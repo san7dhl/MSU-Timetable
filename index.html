@@ -1,0 +1,1827 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>University Timetable Tool</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+
+    <style>
+        :root {
+            --main-color: #0A7EAE;
+            --accent-color: #E09511;
+            --dark-bg: #020617; /* slate-950 */
+            --panel-bg: #1e293b; /* slate-800 */
+            --border-color: rgba(255, 255, 255, 0.1);
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            background-color: var(--dark-bg);
+            color: #cbd5e1; /* slate-300 */
+        }
+        
+        .panel {
+            background-color: var(--panel-bg);
+            border-radius: 1rem;
+            border: 1px solid var(--border-color);
+        }
+
+        .timetable-grid {
+            display: grid;
+            grid-template-columns: 80px repeat(8, 1fr);
+            grid-template-rows: 40px repeat(5, 80px);
+            gap: 4px;
+        }
+        .grid-header {
+            font-weight: 600;
+            font-size: 0.8rem;
+            color: #94a3b8; /* slate-400 */
+        }
+        .time-slot {
+            font-size: 0.75rem;
+            position: relative;
+            transition: background-color 0.3s, box-shadow 0.3s;
+            background-color: #0f172a; /* slate-900 */
+            border: 1px solid var(--border-color);
+            border-radius: 0.5rem;
+        }
+        .time-slot.lunch {
+            background-color: var(--accent-color);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            color: white;
+            opacity: 0.8;
+        }
+        .time-slot.fixed-block {
+            background-color: var(--accent-color);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            color: white;
+            opacity: 0.7;
+        }
+        .course-card {
+            padding: 8px;
+            border-radius: 0.5rem;
+            font-size: 0.8rem;
+            cursor: grab;
+            transition: background-color 0.3s, box-shadow 0.3s;
+            background-color: #334155; /* slate-700 */
+            border: 1px solid #475569; /* slate-600 */
+        }
+        .course-card:hover {
+            background-color: #475569; /* slate-600 */
+        }
+        .course-card.dragging {
+            opacity: 0.5;
+        }
+        .scheduled-item {
+            padding: 2px 4px;
+            border-radius: 6px;
+            color: white;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            overflow: hidden;
+            position: relative;
+        }
+        .scheduled-item.is-common-course {
+            border-left: 4px solid var(--accent-color);
+        }
+        .scheduled-item .course-name { font-weight: 600; font-size: 0.8rem; }
+        .scheduled-item .faculty-name { font-size: 0.7rem; opacity: 0.9; }
+        .scheduled-item.applied::after, .scheduled-item.theory::after {
+            position: absolute; bottom: 2px; right: 4px; font-size: 10px; font-weight: bold;
+            background: rgba(0,0,0,0.2); border-radius: 50%; width: 14px; height: 14px;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .scheduled-item.applied::after { content: 'A'; }
+        .scheduled-item.theory::after { content: 'T'; }
+        .delete-btn {
+            position: absolute; top: 2px; right: 2px; width: 16px; height: 16px;
+            background-color: rgba(0,0,0,0.4); color: white; border-radius: 50%;
+            display: none; align-items: center; justify-content: center;
+            font-size: 10px; cursor: pointer;
+        }
+        .time-slot:hover .delete-btn { display: flex; }
+        .scheduled-item.is-common-course .delete-btn { display: none !important; }
+
+        .loader {
+            border: 4px solid #f3f3f3; border-top: 4px solid var(--main-color); border-radius: 50%;
+            width: 40px; height: 40px; animation: spin 1s linear infinite;
+            position: fixed; top: 50%; left: 50%; margin-top: -20px; margin-left: -20px; z-index: 100;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        
+        .tab-button { 
+            color: #94a3b8; /* slate-400 */
+            padding: 8px 16px;
+            border-radius: 0.5rem;
+            transition: background-color 0.2s, color 0.2s;
+        }
+        .tab-button:hover {
+            background-color: #334155; /* slate-700 */
+            color: #f1f5f9; /* slate-100 */
+        }
+        .tab-button.active { 
+            background-color: var(--main-color);
+            color: white;
+            font-weight: 600; 
+        }
+        
+        .clash-highlight {
+            background-color: rgba(239, 68, 68, 0.2);
+            box-shadow: inset 0 0 0 2px #ef4444;
+        }
+        .drag-over {
+            box-shadow: inset 0 0 0 2px var(--main-color);
+            background-color: rgba(10, 126, 174, 0.3);
+        }
+        .semester-button.active {
+            background-color: var(--main-color);
+            color: white;
+            border-color: var(--main-color);
+        }
+        .empty-state {
+            text-align: center;
+            padding: 2rem;
+            border: 2px dashed #334155; /* slate-700 */
+            border-radius: 0.5rem;
+            color: #9ca3af; /* gray-400 */
+        }
+        select, input[type="text"], input[type="number"] {
+            background-color: #0f172a; /* slate-900 */
+            border: 1px solid #334155; /* slate-700 */
+            color: #cbd5e1; /* slate-300 */
+        }
+        select:focus, input:focus {
+            --tw-ring-color: var(--main-color) !important;
+            border-color: var(--main-color) !important;
+        }
+        option {
+            background-color: #1e293b; /* slate-800 */
+            color: #cbd5e1;
+        }
+        .swal2-popup {
+            background: #1e293b !important;
+            color: #e5e7eb !important;
+            border: 1px solid var(--border-color);
+        }
+        .swal2-input, .swal2-select {
+            background: #0f172a !important;
+            border: 1px solid #334155 !important;
+            color: #e5e7eb !important;
+        }
+
+    </style>
+</head>
+<body class="text-gray-200">
+
+    <div id="loader" class="loader hidden"></div>
+    <div id="hover-tooltip" class="hidden absolute px-3 py-1 text-white text-sm rounded-lg shadow-lg z-50"></div>
+
+    <div id="app" class="max-w-7xl mx-auto p-4 md:p-6">
+        <header class="mb-8 text-center">
+            <h1 class="text-3xl font-bold text-white">Medhavi Skills University Timetable Planning Tool</h1>
+            <p class="text-gray-400 mt-1">Automated clash detection with custom faculty workload warnings.</p>
+             <div id="collab-info" class="mt-4 text-xs text-gray-400">
+                <p>Workspace ID: <span id="user-id-display" class="font-mono"></span></p>
+                <button id="share-btn" class="mt-2 px-3 py-1 bg-white/10 rounded-md hover:bg-white/20 transition">Share Workspace</button>
+            </div>
+        </header>
+
+        <div class="mb-8">
+            <nav class="flex space-x-2" id="view-tabs">
+                <button data-view="group" class="tab-button active">Student Group Schedule</button>
+                <button data-view="faculty" class="tab-button">Faculty Schedule</button>
+                <button data-view="manage" class="tab-button">Data & Settings</button>
+            </nav>
+        </div>
+
+        <main id="main-content">
+            <div id="manage-view" class="hidden panel p-6">
+                 <h2 class="text-xl font-semibold mb-6 text-white">Data & Settings</h2>
+                 
+                 <div class="bg-slate-900/50 p-4 rounded-lg border border-[--border-color] mb-8">
+                   <h3 class="text-lg font-medium mb-3 text-white">Import & Export</h3>
+                   <p class="text-gray-400 mb-4 text-sm">Import data from a multi-sheet Excel file (`Programs`, `Courses`, `Faculty`). This is the recommended way to manage your data.</p>
+                   <div class="flex items-center space-x-4">
+                       <input type="file" id="excel-file-input" accept=".xlsx, .xls" class="block w-full text-sm text-gray-300 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-white/10 file:text-white hover:file:bg-white/20"/>
+                       <button id="import-button" class="px-4 py-2 bg-[--main-color] text-white rounded-lg hover:bg-cyan-700 transition-colors flex-shrink-0">Import Data</button>
+                   </div>
+                    <div class="mt-4">
+                       <button id="download-template-btn" class="text-sm text-amber-400 hover:underline">Download Multi-Sheet Excel Template</button>
+                   </div>
+                 </div>
+
+                 <div class="bg-slate-900/50 p-4 rounded-lg border border-[--border-color] mb-8">
+                   <h3 class="text-lg font-medium mb-3 text-white">Global Settings</h3>
+                   <div>
+                       <label for="workload-limit-input" class="block text-sm font-medium text-gray-200">Default Faculty Workload Limit (Periods/Week)</label>
+                       <p class="text-xs text-gray-400 mb-1">This is used for new faculty or when not specified per-faculty.</p>
+                       <input type="number" id="workload-limit-input" class="mt-1 block w-full max-w-xs pl-3 pr-3 py-2 text-base rounded-md">
+                   </div>
+                 </div>
+                 
+                 <p class="text-gray-300 mb-6">Add, edit, or delete courses and faculty directly. You can set a specific workload limit for each faculty member.</p>
+                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                   <div>
+                       <div class="flex justify-between items-center mb-3">
+                           <h3 class="text-lg font-medium text-white">Faculty Members</h3>
+                           <button id="add-faculty-btn" class="px-3 py-1.5 bg-[--main-color] text-white text-sm rounded-lg hover:bg-cyan-700 transition-colors flex items-center gap-2">
+                               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                               Add Faculty
+                           </button>
+                       </div>
+                       <input type="text" id="faculty-search-input" placeholder="Search faculty..." class="w-full mb-3 px-3 py-2 rounded-md">
+                       <div id="faculty-management-list" class="space-y-2 max-h-96 overflow-y-auto p-1"></div>
+                   </div>
+                   <div>
+                       <div class="flex justify-between items-center mb-3">
+                           <h3 class="text-lg font-medium text-white">Courses</h3>
+                            <button id="add-course-btn" class="px-3 py-1.5 bg-[--main-color] text-white text-sm rounded-lg hover:bg-cyan-700 transition-colors flex items-center gap-2">
+                               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                               Add Course
+                           </button>
+                       </div>
+                       <input type="text" id="course-search-input" placeholder="Search courses..." class="w-full mb-3 px-3 py-2 rounded-md">
+                       <div id="course-management-list" class="space-y-2 max-h-96 overflow-y-auto p-1"></div>
+                   </div>
+                 </div>
+            </div>
+
+            <div id="group-view">
+                <div id="initial-empty-state" class="hidden">
+                    <div class="panel p-8 text-center">
+                        <h2 class="text-2xl font-bold text-white mb-2">Welcome!</h2>
+                        <p class="text-gray-300 mb-6">To begin planning, please import your university's data.</p>
+                        <button id="empty-state-import-btn" class="px-6 py-3 bg-[--main-color] text-white font-semibold rounded-lg hover:bg-cyan-700 transition-colors">
+                            Import Data to Get Started
+                        </button>
+                    </div>
+                </div>
+                <div id="group-view-content" class="grid grid-cols-1 md:grid-cols-4 gap-6">
+                    <div class="md:col-span-1 panel p-4 h-fit">
+                        <h3 class="font-semibold text-lg mb-4 text-white">Controls</h3>
+                        <div class="space-y-4">
+                            <div>
+                                <label for="department-select" class="block text-sm font-medium text-gray-300">Department</label>
+                                <select id="department-select" class="mt-1 block w-full pl-3 pr-10 py-2 text-base focus:outline-none sm:text-sm rounded-md"></select>
+                            </div>
+                            <div>
+                                <label for="program-select" class="block text-sm font-medium text-gray-300">Program</label>
+                                <select id="program-select" class="mt-1 block w-full pl-3 pr-10 py-2 text-base focus:outline-none sm:text-sm rounded-md"></select>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-300">Semester</label>
+                                <div id="semester-buttons" class="mt-2 flex flex-wrap gap-2"></div>
+                            </div>
+                        </div>
+                        <hr class="my-6 border-white/10">
+                        <h3 class="font-semibold text-lg mb-2 text-white">Courses to Schedule</h3>
+                        <p class="text-sm text-gray-400 mb-4">Drag a course from the list onto a grid slot to schedule it.</p>
+                        <div id="course-list" class="space-y-2 max-h-96 overflow-y-auto p-1"></div>
+                    </div>
+
+                    <div class="md:col-span-3 panel p-4">
+                        <div class="flex justify-between items-center mb-4">
+                            <h3 class="text-lg font-semibold text-white">Timetable Grid</h3>
+                            <div class="flex items-center space-x-2">
+                                <button id="clear-schedule-btn" class="px-3 py-2 bg-red-600 text-white text-sm rounded-lg hover:bg-red-700 transition-colors flex items-center gap-2">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                                    Clear
+                                </button>
+                                <button id="export-group-excel-btn" class="px-3 py-2 bg-emerald-600 text-white text-sm rounded-lg hover:bg-emerald-700 transition-colors flex items-center gap-2">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+                                    Export
+                                </button>
+                                <button id="print-btn" class="px-3 py-2 bg-gray-600 text-white text-sm rounded-lg hover:bg-gray-700 transition-colors flex items-center gap-2">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
+                                    Print
+                                </button>
+                            </div>
+                        </div>
+                        <div id="timetable-grid" class="timetable-grid"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="faculty-view" class="hidden">
+                 <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
+                    <div class="md:col-span-1 panel p-4 h-fit">
+                        <h3 class="font-semibold text-lg mb-4 text-white">Select Faculty</h3>
+                        <div class="space-y-4">
+                             <div>
+                                <label for="faculty-select" class="block text-sm font-medium text-gray-200">Faculty Member</label>
+                                <select id="faculty-select" class="mt-1 block w-full pl-3 pr-10 py-2 text-base focus:outline-none sm:text-sm rounded-md"></select>
+                            </div>
+                        </div>
+                         <div id="faculty-workload" class="mt-6 text-sm"></div>
+                    </div>
+                    <div class="md:col-span-3 panel p-4">
+                         <div class="flex justify-between items-center mb-4">
+                            <h3 class="text-lg font-semibold text-white">Faculty Schedule</h3>
+                            <div class="flex items-center space-x-2">
+                                <button id="export-faculty-excel-btn" class="px-3 py-2 bg-emerald-600 text-white text-sm rounded-lg hover:bg-emerald-700 transition-colors flex items-center gap-2">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+                                    Export
+                                </button>
+                                <button id="print-faculty-btn" class="px-3 py-2 bg-gray-600 text-white text-sm rounded-lg hover:bg-gray-700 transition-colors flex items-center gap-2">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
+                                    Print
+                                </button>
+                            </div>
+                        </div>
+                        <div id="faculty-timetable-grid" class="timetable-grid"></div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <footer class="text-center text-sm text-gray-400 mt-8 py-4 border-t border-white/10">
+            &copy; <span id="current-year">2025</span> Sandhya Sharma. All Rights Reserved.
+        </footer>
+
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, getDoc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // --- STATE & CONFIGURATION ---
+        let DB = { departments: [], programs: [], faculty: [], courses: [], schedule: {}, workloadLimit: 20 };
+        let selectedCourse = null;
+        let selectedGroup = { department: null, program: null, semester: null };
+        let selectedFaculty = { name: null };
+        
+        let db, auth;
+        let unsubscribe;
+
+        const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+        const periods = [
+            { number: 1, time: '09:30-10:20' }, { number: 2, time: '10:20-11:10' },
+            { number: 3, time: '11:10-12:00' }, { number: 4, time: '12:00-12:50' },
+            { number: 5, time: '12:50-01:40' }, { number: 6, time: '01:40-02:30' },
+            { number: 7, time: '02:30-03:20' }, { number: 8, time: '03:20-04:10' }
+        ];
+        const colorPalette = ['#22d3ee', '#a3e635', '#f87171', '#fb923c', '#a78bfa', '#f472b6', '#34d399', '#fbbf24'];
+        const courseColors = {};
+
+        const LUNCH_PERIODS = {
+            default: 5,
+            1: 4,
+        };
+
+        const FIXED_BLOCKS = [
+            { semester: 1, day: 'Wednesday', periods: [5, 6, 7, 8], label: 'Skill Drill' }
+        ];
+
+        const dom = {
+            loader: document.getElementById('loader'),
+            departmentSelect: document.getElementById('department-select'),
+            programSelect: document.getElementById('program-select'),
+            semesterButtons: document.getElementById('semester-buttons'),
+            courseList: document.getElementById('course-list'),
+            timetableGrid: document.getElementById('timetable-grid'),
+            facultySelect: document.getElementById('faculty-select'),
+            facultyTimetableGrid: document.getElementById('faculty-timetable-grid'),
+            facultyWorkload: document.getElementById('faculty-workload'),
+            hoverTooltip: document.getElementById('hover-tooltip'),
+            initialEmptyState: document.getElementById('initial-empty-state'),
+            groupViewContent: document.getElementById('group-view-content'),
+            manage: {
+                facultyList: document.getElementById('faculty-management-list'),
+                courseList: document.getElementById('course-management-list'),
+                addFacultyBtn: document.getElementById('add-faculty-btn'),
+                addCourseBtn: document.getElementById('add-course-btn'),
+                workloadLimitInput: document.getElementById('workload-limit-input'),
+                facultySearch: document.getElementById('faculty-search-input'),
+                courseSearch: document.getElementById('course-search-input'),
+            }
+        };
+
+        // --- UTILITY ---
+        function getCourseUniqueId(course) {
+            if (!course || !course.courseName || !course.programName || !course.semester || !course.courseType) return null;
+            return `${course.courseName}_${course.programName}_${course.semester}_${course.courseType}`;
+        }
+
+        // --- INITIALIZATION ---
+        window.onload = () => {
+            initEventListeners();
+            initFirebase();
+            document.getElementById('current-year').textContent = new Date().getFullYear();
+        };
+
+                async function initFirebase() {
+                    const urlParams = new URLSearchParams(window.location.search);
+                    let appId = urlParams.get('appId');
+
+                    if (!appId) {
+                        appId = crypto.randomUUID().substring(0, 12);
+                        window.location.href = `${window.location.pathname}?appId=${appId}`;
+                        return;
+                    }
+
+                    // This is the PUBLIC configuration. It's safe to have this in the browser.
+                    // Replace with your project's details.
+                    const publicFirebaseConfig = {
+                        apiKey: "AIzaSyAujuoVJ92uCYwoH5wSdhgOb6xHunbQuHA", // Get this from your Firebase project settings
+                        authDomain: "mytimetabletool.firebaseapp.com",
+                        projectId: "mytimetabletool",
+                        storageBucket: "mytimetabletool.firebasestorage.app",
+                        messagingSenderId: "223071964236",
+                        appId: "1:223071964236:web:6bccbe36daacba865a38e9",
+                        measurementId: "G-B1H5VE5Z2B"
+                    };
+
+                    const app = initializeApp(publicFirebaseConfig);
+                    db = getFirestore(app);
+                    auth = getAuth(app);
+
+                    try {
+                        // Call our secure Netlify function to get an auth token
+                        const response = await fetch('/.netlify/functions/get-firebase-token');
+                        if (!response.ok) {
+                            throw new Error('Failed to fetch auth token from server.');
+                        }
+                        const data = await response.json();
+                        const token = data.token;
+
+                        // Sign in with the custom token
+                        await signInWithCustomToken(auth, token);
+
+                        // Now that we are authenticated, listen for data changes
+                        document.getElementById('user-id-display').textContent = appId;
+                        listenForDataChanges(appId);
+
+                    } catch (error) {
+                        console.error("Firebase production setup failed:", error);
+                        Swal.fire('Authentication Error', 'Could not connect to the collaborative session.', 'error');
+                    }
+                }
+                
+                function listenForDataChanges(appId) {
+                    const dbRef = doc(db, "artifacts", appId, "public", "data");
+                    if (unsubscribe) unsubscribe();
+
+                    unsubscribe = onSnapshot(dbRef, (docSnap) => {
+                        if (docSnap.exists()) {
+                            const data = docSnap.data();
+                            DB = { ...{ departments: [], programs: [], faculty: [], courses: [], schedule: {}, workloadLimit: 20 }, ...data };
+                        } else {
+                            DB = { departments: [], programs: [], faculty: [], courses: [], schedule: {}, workloadLimit: 20 };
+                        }
+                        renderAll();
+                        checkInitialState();
+                    }, (error) => {
+                        console.error("Error listening to Firestore:", error);
+                        Swal.fire('Connection Error', 'Could not listen for real-time updates.', 'error');
+                    });
+        }
+
+
+        function initEventListeners() {
+            document.getElementById('view-tabs').addEventListener('click', (e) => {
+                if (e.target.tagName === 'BUTTON') showView(e.target.dataset.view);
+            });
+            document.getElementById('import-button').addEventListener('click', handleImport);
+            document.getElementById('download-template-btn').addEventListener('click', downloadTemplate);
+            document.getElementById('print-btn').addEventListener('click', () => printTimetable('group'));
+            document.getElementById('print-faculty-btn').addEventListener('click', () => printTimetable('faculty'));
+            document.getElementById('export-group-excel-btn').addEventListener('click', () => exportToExcel('group'));
+            document.getElementById('export-faculty-excel-btn').addEventListener('click', () => exportToExcel('faculty'));
+            document.getElementById('clear-schedule-btn').addEventListener('click', handleClearSchedule);
+            document.getElementById('empty-state-import-btn').addEventListener('click', () => showView('manage'));
+            
+            // MODIFICATION: Share button now shares the full URL
+            document.getElementById('share-btn').addEventListener('click', () => {
+                 const shareUrl = window.location.href;
+                 Swal.fire({
+                     title: 'Share Workspace',
+                     html: `Share this URL with your colleagues to collaborate:<br><br><input type="text" value="${shareUrl}" class="swal2-input" readonly>`,
+                     confirmButtonText: 'Copy URL'
+                 }).then((result) => {
+                     if(result.isConfirmed) {
+                         const input = Swal.getPopup().querySelector('input');
+                         input.select();
+                         document.execCommand('copy');
+                         Swal.fire('Copied!', 'Shareable URL copied to clipboard.', 'success');
+                     }
+                 });
+            });
+            
+            dom.departmentSelect.addEventListener('change', handleDepartmentChange);
+            dom.programSelect.addEventListener('change', handleProgramChange);
+            dom.facultySelect.addEventListener('change', handleFacultyChange);
+            
+            dom.timetableGrid.addEventListener('click', handleGridClick);
+            dom.timetableGrid.addEventListener('mouseover', handleGridHover);
+            dom.timetableGrid.addEventListener('mouseout', handleGridMouseOut);
+            dom.timetableGrid.addEventListener('mousemove', handleGridMouseMove);
+            
+            dom.courseList.addEventListener('dragstart', handleDragStart);
+            dom.timetableGrid.addEventListener('dragover', handleDragOver);
+            dom.timetableGrid.addEventListener('dragleave', handleDragLeave);
+            dom.timetableGrid.addEventListener('drop', handleDrop);
+
+            dom.manage.addFacultyBtn.addEventListener('click', handleAddFaculty);
+            dom.manage.addCourseBtn.addEventListener('click', handleAddCourse);
+            dom.manage.workloadLimitInput.addEventListener('change', handleWorkloadLimitChange);
+            dom.manage.facultySearch.addEventListener('input', () => renderManageView());
+            dom.manage.courseSearch.addEventListener('input', () => renderManageView());
+        }
+
+        async function saveState() { 
+            const urlParams = new URLSearchParams(window.location.search);
+            const appId = typeof __app_id !== 'undefined' ? __app_id : urlParams.get('appId');
+
+            if (!db) {
+                try {
+                    localStorage.setItem('timetableAppDB', JSON.stringify(DB)); 
+                } catch (e) {
+                    console.error("Failed to save state to localStorage", e);
+                    Swal.fire('Save Error', 'Could not save data to your browser. Your changes might not persist.', 'error');
+                }
+                return;
+            }
+            
+            const dbRef = doc(db, "artifacts", appId, "public", "data");
+            try {
+                await setDoc(dbRef, DB);
+            } catch (error) {
+                console.error("Error saving to Firestore:", error);
+                Swal.fire('Save Error', 'Could not save changes to the cloud.', 'error');
+            }
+        }
+        function loadState() {
+            const savedDB = localStorage.getItem('timetableAppDB');
+            if (savedDB) {
+                try {
+                    const parsedDB = JSON.parse(savedDB);
+                    DB = { ...{ workloadLimit: 20 }, ...parsedDB };
+                    DB.faculty.forEach(f => {
+                        if (f.workloadLimit === undefined) f.workloadLimit = DB.workloadLimit;
+                    });
+                } catch(e) {
+                    console.error("Failed to parse saved state from localStorage", e);
+                    localStorage.removeItem('timetableAppDB');
+                    DB = { departments: [], programs: [], faculty: [], courses: [], schedule: {}, workloadLimit: 20 };
+                }
+            }
+        }
+
+        function checkInitialState() {
+            if (DB.courses.length === 0) {
+                dom.initialEmptyState.classList.remove('hidden');
+                dom.groupViewContent.classList.add('hidden');
+            } else {
+                dom.initialEmptyState.classList.add('hidden');
+                dom.groupViewContent.classList.remove('hidden');
+            }
+        }
+
+        function showView(viewName) {
+            document.querySelectorAll('#main-content > div').forEach(v => v.classList.add('hidden'));
+            document.querySelectorAll('.tab-button').forEach(b => b.classList.remove('active'));
+            document.querySelector(`[data-view="${viewName}"]`).classList.add('active');
+            document.getElementById(`${viewName}-view`).classList.remove('hidden');
+            
+            if (viewName === 'group') {
+                checkInitialState();
+                renderGroupView();
+            }
+            else if (viewName === 'faculty') renderFacultyView();
+            else if (viewName === 'manage') renderManageView();
+        }
+
+        function renderAll() {
+            renderGroupView(); 
+            renderFacultyView();
+        }
+
+        function renderGroupView() {
+            if (DB.courses.length === 0) return;
+            
+            populateSelect(dom.departmentSelect, DB.departments.map(d => d.departmentName).sort());
+
+            if (selectedGroup.department) {
+                dom.departmentSelect.value = selectedGroup.department;
+            } else if (DB.departments.length > 0) {
+                dom.departmentSelect.value = DB.departments[0].departmentName;
+            }
+            
+            handleDepartmentChange();
+        }
+
+        function handleDepartmentChange() {
+            selectedCourse = null;
+            selectedGroup.department = dom.departmentSelect.value;
+            const programsInDept = DB.programs
+                .filter(p => p.departmentName === selectedGroup.department)
+                .map(p => p.programName)
+                .sort();
+            populateSelect(dom.programSelect, programsInDept);
+            
+            if (programsInDept.includes(selectedGroup.program)) {
+                dom.programSelect.value = selectedGroup.program;
+            } else if (programsInDept.length > 0) {
+                dom.programSelect.value = programsInDept[0];
+            }
+            
+            handleProgramChange();
+        }
+
+        function handleProgramChange() {
+            selectedCourse = null;
+            selectedGroup.program = dom.programSelect.value;
+            const program = DB.programs.find(p => p.programName === selectedGroup.program);
+            
+            dom.semesterButtons.innerHTML = '';
+
+            if (!program) {
+                selectedGroup.semester = null;
+                handleSemesterChange();
+                return;
+            }
+
+            const totalSemesters = program.semesters;
+            const allSemesters = [];
+            for (let i = 1; i <= totalSemesters; i++) {
+                allSemesters.push(i);
+            }
+
+            if (allSemesters.length === 0) {
+                dom.semesterButtons.innerHTML = `<span class="text-xs text-gray-400">No semesters available.</span>`;
+                selectedGroup.semester = null;
+                handleSemesterChange();
+                return;
+            }
+
+            allSemesters.forEach(sem => {
+                const button = document.createElement('button');
+                button.className = 'semester-button px-4 py-1.5 border border-white/20 rounded-md text-sm transition-colors hover:bg-white/10';
+                button.textContent = `Sem ${sem}`;
+                button.dataset.semester = sem;
+                button.addEventListener('click', (e) => handleSemesterChange(e));
+                dom.semesterButtons.appendChild(button);
+            });
+
+            const currentButtons = dom.semesterButtons.querySelectorAll('button');
+            let selectedButton = Array.from(currentButtons).find(btn => btn.dataset.semester == selectedGroup.semester);
+
+            if (!selectedButton && currentButtons.length > 0) {
+                selectedButton = currentButtons[0];
+            }
+            
+            if (selectedButton) {
+                selectedButton.click();
+            } else {
+                selectedGroup.semester = null;
+                handleSemesterChange();
+            }
+        }
+
+        function handleSemesterChange(e) {
+            selectedCourse = null;
+            if (e) {
+                dom.semesterButtons.querySelectorAll('button').forEach(btn => btn.classList.remove('active'));
+                e.target.classList.add('active');
+                selectedGroup.semester = e.target.dataset.semester;
+            }
+            renderCourseList();
+            renderTimetableGrid();
+        }
+
+        function renderCourseList() {
+            dom.courseList.innerHTML = '';
+            if (!selectedGroup.program || !selectedGroup.semester) {
+                dom.courseList.innerHTML = `<div class="empty-state"><p>Select a program and semester to see courses.</p></div>`;
+                return;
+            }
+            
+            const coursesForGroup = DB.courses.filter(c => {
+                return String(c.programName).trim() === String(selectedGroup.program).trim() && 
+                       String(c.semester) === String(selectedGroup.semester);
+            });
+
+            if (coursesForGroup.length === 0) {
+                dom.courseList.innerHTML = `<div class="empty-state"><p>No courses found for this semester.</p><p class="text-xs mt-1">You can add them in the 'Data & Settings' tab.</p></div>`;
+                return;
+            }
+            
+            const effectiveSchedule = getEffectiveScheduleForGroup(selectedGroup.program, selectedGroup.semester);
+            const scheduledCounts = {};
+            Object.values(effectiveSchedule).forEach(slot => {
+                if (slot.course) {
+                    const courseId = getCourseUniqueId(slot.course);
+                    scheduledCounts[courseId] = (scheduledCounts[courseId] || 0) + 1;
+                }
+            });
+
+            coursesForGroup.forEach(course => {
+                const courseId = getCourseUniqueId(course);
+                const count = scheduledCounts[courseId] || 0;
+                const card = document.createElement('div');
+                const isSelected = getCourseUniqueId(selectedCourse) === courseId;
+                card.className = `course-card p-3 rounded-lg border ${isSelected ? 'bg-white/20 border-white/30' : 'bg-white/10 border-transparent'}`;
+                card.dataset.courseId = courseId;
+                card.draggable = true;
+                card.innerHTML = `
+                    <div class="font-bold text-white">${course.courseName}</div>
+                    <div class="text-sm text-gray-300">Faculty: ${course.facultyName}</div>
+                    <div class="text-sm text-gray-400">Type: ${course.courseType}</div>
+                    <div class="text-sm mt-1">Scheduled: ${count} / ${course.periodsPerWeek}</div>
+                    <div class="w-full bg-black/20 rounded-full h-1.5 mt-2">
+                        <div class="bg-cyan-500 h-1.5 rounded-full" style="width: ${count / course.periodsPerWeek * 100}%"></div>
+                    </div>`;
+                card.addEventListener('click', () => {
+                    selectCourse(course);
+                });
+                dom.courseList.appendChild(card);
+            });
+        }
+
+        function getEffectiveScheduleForGroup(programName, semester, visited = new Set()) {
+            if (!programName || visited.has(programName)) return {};
+            visited.add(programName);
+
+            const program = DB.programs.find(p => p.programName === programName);
+            if (!program) return {};
+
+            let parentSchedules = {};
+            if (program.parentPrograms && program.parentPrograms.length > 0) {
+                program.parentPrograms.forEach(parentName => {
+                    const parentSchedule = getEffectiveScheduleForGroup(parentName, semester, visited);
+                    parentSchedules = { ...parentSchedules, ...parentSchedule };
+                });
+            }
+            
+            const ownScheduleKey = `${programName}_${semester}`;
+            const ownSchedule = DB.schedule[ownScheduleKey] || {};
+
+            return { ...parentSchedules, ...ownSchedule };
+        }
+
+        function renderTimetableGrid() {
+            dom.timetableGrid.innerHTML = '';
+            dom.timetableGrid.appendChild(document.createElement('div'));
+            periods.forEach(period => {
+                const header = document.createElement('div');
+                header.className = 'grid-header flex flex-col items-center justify-center text-center';
+                header.innerHTML = `<span class="font-semibold">${period.number}</span><span class="text-xs text-gray-400">${period.time}</span>`;
+                dom.timetableGrid.appendChild(header);
+            });
+
+            const effectiveSchedule = getEffectiveScheduleForGroup(selectedGroup.program, selectedGroup.semester);
+            const lunchPeriod = LUNCH_PERIODS[selectedGroup.semester] || LUNCH_PERIODS.default;
+
+            days.forEach(day => {
+                const dayHeader = document.createElement('div');
+                dayHeader.className = 'grid-header flex items-center justify-center';
+                dayHeader.textContent = day;
+                dom.timetableGrid.appendChild(dayHeader);
+
+                periods.forEach(period => {
+                    const slot = document.createElement('div');
+                    slot.className = 'time-slot';
+                    slot.dataset.day = day;
+                    slot.dataset.period = period.number;
+
+                    const fixedBlock = FIXED_BLOCKS.find(b =>
+                        b.semester == selectedGroup.semester &&
+                        b.day === day &&
+                        b.periods.includes(period.number)
+                    );
+
+                    if (fixedBlock) {
+                        slot.classList.add('fixed-block');
+                        slot.innerHTML = `<div class="scheduled-item flex items-center justify-center"><span class="course-name">${fixedBlock.label}</span></div>`;
+                        dom.timetableGrid.appendChild(slot);
+                        return;
+                    }
+
+                    if (period.number === lunchPeriod) {
+                        slot.classList.add('lunch');
+                        slot.textContent = 'LUNCH';
+                    } else {
+                        const slotKey = `${day}_${period.number}`;
+                        const scheduledItem = effectiveSchedule[slotKey];
+                        if (scheduledItem?.course) {
+                            const courseId = getCourseUniqueId(scheduledItem.course);
+                            if (!courseColors[courseId]) {
+                                courseColors[courseId] = colorPalette[Object.keys(courseColors).length % colorPalette.length];
+                            }
+                            slot.style.backgroundColor = courseColors[courseId];
+                            
+                            let typeClass = '';
+                            const courseType = scheduledItem.course.courseType?.toLowerCase();
+                            if (courseType === 'applied') typeClass = 'applied';
+                            else if (courseType === 'theory') typeClass = 'theory';
+                            
+                            const isCommon = scheduledItem.course.programName !== selectedGroup.program;
+                            if (isCommon) typeClass += ' is-common-course';
+
+                            slot.innerHTML = `
+                                <div class="scheduled-item ${typeClass}">
+                                    <span class="course-name">${scheduledItem.course.courseName}</span>
+                                    <span class="faculty-name">${scheduledItem.facultyName}</span>
+                                </div>
+                                <div class="delete-btn" data-day="${day}" data-period="${period.number}">&#x2715;</div>`;
+                            slot.querySelector('.delete-btn').addEventListener('click', (e) => {
+                                e.stopPropagation();
+                                handleDelete(day, period.number);
+                            });
+                        }
+                    }
+                    dom.timetableGrid.appendChild(slot);
+                });
+            });
+            highlightClashSlots();
+        }
+
+        function renderFacultyView() {
+             const facultyOptions = DB.faculty.map(f => ({
+                 text: `${f.facultyName} (${f.departmentName})`,
+                 value: f.facultyName
+             })).sort((a, b) => a.text.localeCompare(b.text));
+
+            populateSelect(dom.facultySelect, facultyOptions, true);
+            
+            if (selectedFaculty.name) {
+                dom.facultySelect.value = selectedFaculty.name;
+            } else if (facultyOptions.length > 0) {
+                dom.facultySelect.value = facultyOptions[0].value;
+            }
+
+            handleFacultyChange();
+        }
+
+        function handleFacultyChange() {
+            selectedFaculty.name = dom.facultySelect.value;
+            renderFacultyTimetable();
+            renderFacultyWorkload();
+        }
+        
+        function renderFacultyWorkload() {
+            if (!selectedFaculty.name) {
+                dom.facultyWorkload.innerHTML = '';
+                return;
+            }
+            const facultyMember = DB.faculty.find(f => f.facultyName === selectedFaculty.name);
+            const workloadLimit = facultyMember ? facultyMember.workloadLimit : DB.workloadLimit;
+
+            const uniqueSlots = new Set();
+            Object.values(DB.schedule).forEach(progSched => {
+                Object.entries(progSched).forEach(([slotKey, slotData]) => {
+                    if (slotData.facultyName === selectedFaculty.name) {
+                       uniqueSlots.add(slotKey);
+                    }
+                });
+            });
+            const totalPeriods = uniqueSlots.size;
+            let warning = totalPeriods > workloadLimit ? `<span class="text-red-500 font-bold">Workload warning! (Limit: ${workloadLimit})</span>` : '';
+            dom.facultyWorkload.innerHTML = `<p class="font-semibold text-white">Weekly Workload:</p><p>Scheduled Periods: <span class="font-bold">${totalPeriods} / ${workloadLimit}</span></p>${warning}`;
+        }
+
+        function renderFacultyTimetable() {
+            dom.facultyTimetableGrid.innerHTML = '';
+            if (!selectedFaculty.name) {
+                dom.facultyTimetableGrid.innerHTML = `<div class="col-span-full empty-state"><p>Select a faculty member to view their schedule.</p></div>`;
+                return;
+            }
+            dom.facultyTimetableGrid.appendChild(document.createElement('div'));
+            periods.forEach(period => {
+                const header = document.createElement('div');
+                header.className = 'grid-header flex flex-col items-center justify-center text-center';
+                header.innerHTML = `<span class="font-semibold">${period.number}</span><span class="text-xs text-gray-400">${period.time}</span>`;
+                dom.facultyTimetableGrid.appendChild(header);
+            });
+            
+            const facultySchedule = {};
+            Object.entries(DB.schedule).forEach(([progKey, progSched]) => {
+                const [programName, semester] = progKey.split('_');
+                Object.entries(progSched).forEach(([slotKey, slotData]) => {
+                    if (slotData.facultyName === selectedFaculty.name) facultySchedule[slotKey] = { ...slotData, programName, semester };
+                });
+            });
+
+            const isFacultyOnFixedDuty = (day, periodNumber) => {
+                const teachesFixedBlockCourse = DB.courses.some(c => 
+                    c.facultyName === selectedFaculty.name && 
+                    FIXED_BLOCKS.some(fb => fb.label.toLowerCase() === c.courseName.toLowerCase())
+                );
+                if (!teachesFixedBlockCourse) return null;
+
+                const fixedBlock = FIXED_BLOCKS.find(b => 
+                    b.day === day && b.periods.includes(periodNumber)
+                );
+                return fixedBlock;
+            };
+
+            days.forEach(day => {
+                const dayHeader = document.createElement('div');
+                dayHeader.className = 'grid-header flex items-center justify-center';
+                dayHeader.textContent = day;
+                dom.facultyTimetableGrid.appendChild(dayHeader);
+                periods.forEach(period => {
+                    const slot = document.createElement('div');
+                    slot.className = 'time-slot';
+
+                    const fixedBlock = isFacultyOnFixedDuty(day, period.number);
+                    if (fixedBlock) {
+                         slot.classList.add('fixed-block');
+                         slot.innerHTML = `<div class="scheduled-item flex items-center justify-center"><span class="course-name">${fixedBlock.label}</span></div>`;
+                    } else {
+                        const scheduledItem = facultySchedule[`${day}_${period.number}`];
+                        if (scheduledItem) {
+                            slot.style.backgroundColor = 'var(--main-color)';
+                            
+                            let typeClass = '';
+                            const courseType = scheduledItem.course.courseType?.toLowerCase();
+                            if (courseType === 'applied') typeClass = 'applied';
+                            else if (courseType === 'theory') typeClass = 'theory';
+
+                            slot.innerHTML = `
+                                <div class="scheduled-item ${typeClass}">
+                                    <span class="course-name">${scheduledItem.course.courseName}</span>
+                                    <span class="faculty-name text-xs">For: ${scheduledItem.programName} (Sem ${scheduledItem.semester})</span>
+                                </div>`;
+                        }
+                    }
+                    dom.facultyTimetableGrid.appendChild(slot);
+                });
+            });
+        }
+        
+        function renderManageView() {
+            dom.manage.workloadLimitInput.value = DB.workloadLimit;
+
+            const facultySearchTerm = dom.manage.facultySearch.value.toLowerCase();
+            const filteredFaculty = DB.faculty.filter(f => f.facultyName.toLowerCase().includes(facultySearchTerm));
+            
+            dom.manage.facultyList.innerHTML = '';
+            if (filteredFaculty.length === 0) {
+                dom.manage.facultyList.innerHTML = `<div class="empty-state"><p>No faculty members found.</p></div>`;
+            } else {
+                filteredFaculty.sort((a,b) => a.facultyName.localeCompare(b.facultyName)).forEach(faculty => {
+                    const index = DB.faculty.indexOf(faculty);
+                    const item = document.createElement('div');
+                    item.className = 'p-3 rounded-lg border border-white/10 bg-white/5 flex justify-between items-center';
+                    item.innerHTML = `
+                        <div>
+                            <div class="font-semibold text-white">${faculty.facultyName}</div>
+                            <div class="text-sm text-gray-300">${faculty.departmentName}</div>
+                            <div class="text-sm text-gray-400 mt-1">Workload Limit: <b>${faculty.workloadLimit || DB.workloadLimit}</b> periods</div>
+                        </div>
+                        <div class="space-x-2">
+                            <button class="px-2 py-1 text-xs rounded bg-amber-500 hover:bg-amber-600 text-white" data-index="${index}">Edit</button>
+                            <button class="px-2 py-1 text-xs rounded bg-red-600 hover:bg-red-700 text-white" data-index="${index}">Delete</button>
+                        </div>
+                    `;
+                    item.querySelector('.bg-amber-500').addEventListener('click', () => handleEditFaculty(index));
+                    item.querySelector('.bg-red-600').addEventListener('click', () => handleDeleteFaculty(index));
+                    dom.manage.facultyList.appendChild(item);
+                });
+            }
+
+            const courseSearchTerm = dom.manage.courseSearch.value.toLowerCase();
+            const filteredCourses = DB.courses.filter(c => c.courseName.toLowerCase().includes(courseSearchTerm));
+
+            dom.manage.courseList.innerHTML = '';
+            if (filteredCourses.length === 0) {
+                dom.manage.courseList.innerHTML = `<div class="empty-state"><p>No courses found.</p></div>`;
+            } else {
+                filteredCourses.sort((a,b) => a.courseName.localeCompare(b.courseName)).forEach(course => {
+                    const index = DB.courses.indexOf(course);
+                    const item = document.createElement('div');
+                    item.className = 'p-3 rounded-lg border border-white/10 bg-white/5';
+                    item.innerHTML = `
+                        <div class="flex justify-between items-start">
+                            <div>
+                                <div class="font-semibold text-white">${course.courseName} (${course.courseType})</div>
+                                <div class="text-sm text-gray-300">For: ${course.programName} - Sem ${course.semester}</div>
+                                 <div class="text-sm text-gray-300">Faculty: ${course.facultyName}</div>
+                            </div>
+                            <div class="space-x-2 flex-shrink-0 ml-2">
+                                <button class="px-2 py-1 text-xs rounded bg-amber-500 hover:bg-amber-600 text-white" data-index="${index}">Edit</button>
+                                <button class="px-2 py-1 text-xs rounded bg-red-600 hover:bg-red-700 text-white" data-index="${index}">Delete</button>
+                            </div>
+                        </div>
+                    `;
+                    item.querySelector('.bg-amber-500').addEventListener('click', () => handleEditCourse(index));
+                    item.querySelector('.bg-red-600').addEventListener('click', () => handleDeleteCourse(index));
+                    dom.manage.courseList.appendChild(item);
+                });
+            }
+        }
+        
+        function handleWorkloadLimitChange(e) {
+            const newLimit = parseInt(e.target.value, 10);
+            if (!isNaN(newLimit) && newLimit > 0) {
+                DB.workloadLimit = newLimit;
+                saveState();
+                Swal.fire({
+                    toast: true,
+                    position: 'top-end',
+                    icon: 'success',
+                    title: 'Default workload limit saved!',
+                    showConfirmButton: false,
+                    timer: 1500
+                });
+                renderFacultyView(); 
+            }
+        }
+
+        async function handleAddFaculty() {
+            const departmentOptions = DB.departments.reduce((acc, dept) => {
+                acc[dept.departmentName] = dept.departmentName;
+                return acc;
+            }, {});
+
+            const { value: formValues } = await Swal.fire({
+                title: 'Add New Faculty Member',
+                html:
+                    '<input id="swal-input1" class="swal2-input" placeholder="Faculty Name">' +
+                    '<select id="swal-input2" class="swal2-input"></select>' +
+                    `<input id="swal-input3" type="number" class="swal2-input" placeholder="Workload Limit (e.g., ${DB.workloadLimit})">`,
+                focusConfirm: false,
+                didOpen: () => {
+                    const select = document.getElementById('swal-input2');
+                    for(const deptName in departmentOptions) {
+                        select.add(new Option(deptName, deptName));
+                    }
+                },
+                preConfirm: () => {
+                    return [
+                        document.getElementById('swal-input1').value,
+                        document.getElementById('swal-input2').value,
+                        document.getElementById('swal-input3').value
+                    ]
+                }
+            });
+
+            if (formValues && formValues[0]) {
+                const limit = parseInt(formValues[2], 10);
+                DB.faculty.push({ 
+                    facultyName: formValues[0], 
+                    departmentName: formValues[1],
+                    workloadLimit: isNaN(limit) ? DB.workloadLimit : limit
+                });
+                saveState();
+                renderManageView();
+                renderAll();
+            }
+        }
+
+        async function handleEditFaculty(index) {
+            const faculty = DB.faculty[index];
+            const departmentOptions = DB.departments.reduce((acc, dept) => {
+                acc[dept.departmentName] = dept.departmentName;
+                return acc;
+            }, {});
+
+            const { value: formValues } = await Swal.fire({
+                title: 'Edit Faculty Member',
+                html:
+                    `<input id="swal-input1" class="swal2-input" placeholder="Faculty Name" value="${faculty.facultyName}">` +
+                    '<select id="swal-input2" class="swal2-input"></select>' +
+                    `<input id="swal-input3" type="number" class="swal2-input" placeholder="Workload Limit" value="${faculty.workloadLimit || DB.workloadLimit}">`,
+                focusConfirm: false,
+                didOpen: () => {
+                    const select = document.getElementById('swal-input2');
+                    for(const deptName in departmentOptions) {
+                        select.add(new Option(deptName, deptName));
+                    }
+                    select.value = faculty.departmentName;
+                },
+                preConfirm: () => {
+                    return [
+                        document.getElementById('swal-input1').value,
+                        document.getElementById('swal-input2').value,
+                        document.getElementById('swal-input3').value
+                    ]
+                }
+            });
+
+            if (formValues && formValues[0]) {
+                const oldName = DB.faculty[index].facultyName;
+                const newName = formValues[0];
+                const limit = parseInt(formValues[2], 10);
+
+                DB.faculty[index] = { 
+                    facultyName: newName, 
+                    departmentName: formValues[1],
+                    workloadLimit: isNaN(limit) ? DB.workloadLimit : limit
+                };
+                
+                if (oldName !== newName) {
+                    DB.courses.forEach(c => { if(c.facultyName === oldName) c.facultyName = newName; });
+                    Object.values(DB.schedule).forEach(progSched => {
+                        Object.values(progSched).forEach(slot => {
+                            if(slot.facultyName === oldName) slot.facultyName = newName;
+                        });
+                    });
+                }
+
+                saveState();
+                renderManageView();
+                renderAll();
+            }
+        }
+
+        function handleDeleteFaculty(index) {
+            const facultyName = DB.faculty[index].facultyName;
+            Swal.fire({
+                title: `Delete ${facultyName}?`,
+                text: "This will remove the faculty member. Any courses assigned to them will need to be reassigned. This action cannot be undone.",
+                icon: 'warning',
+                showCancelButton: true,
+                confirmButtonColor: '#d33',
+                cancelButtonColor: '#3085d6',
+                confirmButtonText: 'Yes, delete it!'
+            }).then((result) => {
+                if (result.isConfirmed) {
+                    DB.faculty.splice(index, 1);
+                    DB.courses.forEach(c => { if(c.facultyName === facultyName) c.facultyName = "Unassigned"; });
+                    Object.values(DB.schedule).forEach(progSched => {
+                        Object.keys(progSched).forEach(slotKey => {
+                            if(progSched[slotKey].facultyName === facultyName) delete progSched[slotKey];
+                        });
+                    });
+                    saveState();
+                    renderManageView();
+                    renderAll();
+                    Swal.fire('Deleted!', `${facultyName} has been removed.`, 'success');
+                }
+            });
+        }
+
+        async function handleAddCourse() {
+            const programOptions = DB.programs.map(p => p.programName).sort();
+            const facultyOptions = ["Unassigned", ...DB.faculty.map(f => f.facultyName).sort()];
+
+            const { value: formValues } = await Swal.fire({
+                title: 'Add New Course',
+                html: `
+                    <input id="swal-name" class="swal2-input" placeholder="Course Name">
+                    <select id="swal-prog" class="swal2-input">${programOptions.map(p => `<option value="${p}">${p}</option>`).join('')}</select>
+                    <input id="swal-sem" type="number" class="swal2-input" placeholder="Semester">
+                    <select id="swal-faculty" class="swal2-input">${facultyOptions.map(f => `<option value="${f}">${f}</option>`).join('')}</select>
+                    <input id="swal-periods" type="number" class="swal2-input" placeholder="Periods per Week">
+                    <select id="swal-type" class="swal2-input"><option>Theory</option><option>Applied</option></select>
+                `,
+                focusConfirm: false,
+                preConfirm: () => [
+                    document.getElementById('swal-name').value, document.getElementById('swal-prog').value,
+                    document.getElementById('swal-sem').value, document.getElementById('swal-faculty').value,
+                    document.getElementById('swal-periods').value, document.getElementById('swal-type').value
+                ]
+            });
+
+            if (formValues && formValues.every(v => v)) {
+                DB.courses.push({
+                    courseName: formValues[0], programName: formValues[1],
+                    semester: parseInt(formValues[2]), facultyName: formValues[3],
+                    periodsPerWeek: parseInt(formValues[4]), courseType: formValues[5]
+                });
+                saveState();
+                renderManageView();
+                renderAll();
+            }
+        }
+
+        async function handleEditCourse(index) {
+            const course = DB.courses[index];
+            const programOptions = DB.programs.map(p => p.programName).sort();
+            const facultyOptions = ["Unassigned", ...DB.faculty.map(f => f.facultyName).sort()];
+            
+            const { value: formValues } = await Swal.fire({
+                title: 'Edit Course',
+                html: `
+                    <input id="swal-name" class="swal2-input" value="${course.courseName}">
+                    <select id="swal-prog" class="swal2-input">${programOptions.map(p => `<option value="${p}" ${p === course.programName ? 'selected' : ''}>${p}</option>`).join('')}</select>
+                    <input id="swal-sem" type="number" class="swal2-input" value="${course.semester}">
+                    <select id="swal-faculty" class="swal2-input">${facultyOptions.map(f => `<option value="${f}" ${f === course.facultyName ? 'selected' : ''}>${f}</option>`).join('')}</select>
+                    <input id="swal-periods" type="number" class="swal2-input" value="${course.periodsPerWeek}">
+                    <select id="swal-type" class="swal2-input">
+                        <option ${course.courseType === 'Theory' ? 'selected' : ''}>Theory</option>
+                        <option ${course.courseType === 'Applied' ? 'selected' : ''}>Applied</option>
+                    </select>
+                `,
+                focusConfirm: false,
+                preConfirm: () => [
+                    document.getElementById('swal-name').value, document.getElementById('swal-prog').value,
+                    document.getElementById('swal-sem').value, document.getElementById('swal-faculty').value,
+                    document.getElementById('swal-periods').value, document.getElementById('swal-type').value
+                ]
+            });
+
+            if (formValues && formValues.every(v => v)) {
+                DB.courses[index] = {
+                    courseName: formValues[0], programName: formValues[1],
+                    semester: parseInt(formValues[2]), facultyName: formValues[3],
+                    periodsPerWeek: parseInt(formValues[4]), courseType: formValues[5]
+                };
+                saveState();
+                renderManageView();
+                renderAll();
+            }
+        }
+
+        function handleDeleteCourse(index) {
+            const course = DB.courses[index];
+            const courseName = course.courseName;
+             Swal.fire({
+                title: `Delete ${courseName}?`,
+                text: "This will remove the course and all its scheduled slots. This action cannot be undone.",
+                icon: 'warning',
+                showCancelButton: true,
+                confirmButtonColor: '#d33',
+                cancelButtonColor: '#3085d6',
+                confirmButtonText: 'Yes, delete it!'
+            }).then((result) => {
+                if (result.isConfirmed) {
+                    const courseIdToDelete = getCourseUniqueId(course);
+                    DB.courses.splice(index, 1);
+                    Object.values(DB.schedule).forEach(progSched => {
+                        Object.keys(progSched).forEach(slotKey => {
+                            if(progSched[slotKey].course && getCourseUniqueId(progSched[slotKey].course) === courseIdToDelete) {
+                                delete progSched[slotKey];
+                            }
+                        });
+                    });
+                    saveState();
+                    renderManageView();
+                    renderAll();
+                    Swal.fire('Deleted!', `${courseName} has been removed.`, 'success');
+                }
+            });
+        }
+
+        function selectCourse(course) {
+            selectedCourse = course;
+            renderCourseList();
+            highlightClashSlots();
+        }
+
+        function highlightClashSlots() {
+            document.querySelectorAll('.time-slot').forEach(slot => slot.classList.remove('clash-highlight'));
+            if (!selectedCourse) return;
+            
+            document.querySelectorAll('.time-slot:not(.lunch):not(.fixed-block)').forEach(slot => {
+                const { day, period } = slot.dataset;
+                if (isSlotClashing(day, parseInt(period), selectedCourse)) {
+                    slot.classList.add('clash-highlight');
+                }
+            });
+        }
+        
+        function isSlotClashing(day, period, courseForSlot, tempSchedule = DB.schedule) {
+            const isFixed = FIXED_BLOCKS.some(b =>
+                b.semester == courseForSlot.semester &&
+                b.day === day &&
+                b.periods.includes(period)
+            );
+            if (isFixed) return true;
+
+            if (checkForFacultyClash(courseForSlot.facultyName, day, period, tempSchedule)) {
+                return true;
+            }
+            
+            const programsToCheck = [courseForSlot.programName, ...findAllChildPrograms(courseForSlot.programName)];
+            const slotKey = `${day}_${period}`;
+            for (const progName of programsToCheck) {
+                const effectiveSchedule = getEffectiveScheduleForGroup(progName, courseForSlot.semester);
+                 if (effectiveSchedule[slotKey]) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        function scheduleCourseAt(day, period, courseToSchedule) {
+            if (isSlotClashing(day, period, courseToSchedule)) {
+                const facultyClash = checkForFacultyClash(courseToSchedule.facultyName, day, period);
+                if (facultyClash) {
+                     Swal.fire({ icon: 'error', title: 'Faculty Clash!', html: `<b>${facultyClash.facultyName}</b> is already scheduled for <b>${facultyClash.course.courseName}</b> for <b>${facultyClash.programName} (Sem ${facultyClash.semester})</b> at this time.` });
+                } else {
+                     Swal.fire('Slot Taken', `This time slot is already occupied or reserved.`, 'error');
+                }
+                return;
+            }
+
+            const courseProgram = courseToSchedule.programName;
+            const courseSemester = courseToSchedule.semester;
+            const facultyName = courseToSchedule.facultyName;
+            const slotKey = `${day}_${period}`;
+            
+            const scheduleKey = `${courseProgram}_${courseSemester}`;
+            if (!DB.schedule[scheduleKey]) {
+                DB.schedule[scheduleKey] = {};
+            }
+            DB.schedule[scheduleKey][slotKey] = { course: courseToSchedule, facultyName: facultyName };
+
+            saveState();
+            renderCourseList();
+            renderTimetableGrid();
+            checkFacultyWorkload(facultyName);
+        }
+
+        function handleGridClick(e) {
+            const slot = e.target.closest('.time-slot');
+            if (!slot || slot.classList.contains('lunch') || slot.classList.contains('fixed-block') || !selectedCourse) return;
+            const { day, period } = slot.dataset;
+            scheduleCourseAt(day, parseInt(period), selectedCourse);
+        }
+
+        function handleDelete(day, period) {
+            const effectiveSchedule = getEffectiveScheduleForGroup(selectedGroup.program, selectedGroup.semester);
+            const slotKey = `${day}_${period}`;
+            const scheduledItem = effectiveSchedule[slotKey];
+            
+            if (!scheduledItem) return;
+
+            const courseOwnerProgram = scheduledItem.course.programName;
+            
+            if(courseOwnerProgram !== selectedGroup.program) {
+                Swal.fire('Action Not Allowed', `This is a common course from '${courseOwnerProgram}'. Please go to that program's schedule to manage it.`, 'info');
+                return;
+            }
+
+            const scheduleKey = `${courseOwnerProgram}_${scheduledItem.course.semester}`;
+            if (DB.schedule[scheduleKey]?.[slotKey]) {
+                delete DB.schedule[scheduleKey][slotKey];
+            }
+
+            saveState();
+            renderCourseList();
+            renderTimetableGrid();
+        }
+
+        function handleClearSchedule() {
+            if (!selectedGroup.program || !selectedGroup.semester) {
+                Swal.fire('No selection', 'Please select a program and semester to clear.', 'info');
+                return;
+            }
+            Swal.fire({
+                title: `Clear schedule for ${selectedGroup.program} (Sem ${selectedGroup.semester})?`,
+                text: "This will remove all scheduled items for this specific group only. Common courses from parent programs will remain. This cannot be undone.",
+                icon: 'warning',
+                showCancelButton: true,
+                confirmButtonColor: '#d33',
+                cancelButtonColor: '#3085d6',
+                confirmButtonText: 'Yes, clear it!'
+            }).then((result) => {
+                if (result.isConfirmed) {
+                    const scheduleKey = `${selectedGroup.program}_${selectedGroup.semester}`;
+                    if (DB.schedule[scheduleKey]) {
+                        delete DB.schedule[scheduleKey];
+                    }
+                    saveState();
+                    renderCourseList();
+                    renderTimetableGrid();
+                    Swal.fire('Cleared!', 'The schedule has been cleared.', 'success');
+                }
+            });
+        }
+
+        function checkForFacultyClash(facultyName, day, period, tempSchedule = DB.schedule) {
+            if (facultyName === "Unassigned") return null;
+            
+            const teachesFixedBlockCourse = DB.courses.some(c => 
+                c.facultyName === facultyName && 
+                FIXED_BLOCKS.some(fb => fb.label.toLowerCase() === c.courseName.toLowerCase())
+            );
+            if (teachesFixedBlockCourse) {
+                const fixedBlock = FIXED_BLOCKS.find(b => b.day === day && b.periods.includes(period));
+                if (fixedBlock) {
+                    return { facultyName: facultyName, reason: `Teaches ${fixedBlock.label} at this time.` };
+                }
+            }
+
+            const slotKey = `${day}_${period}`;
+            for (const progKey in tempSchedule) {
+                if (tempSchedule[progKey]?.[slotKey]?.facultyName === facultyName) {
+                    const [programName, semester] = progKey.split('_');
+                    return { ...tempSchedule[progKey][slotKey], programName, semester };
+                }
+            }
+            return null;
+        }
+        
+        function checkFacultyWorkload(facultyName) {
+            if (facultyName === "Unassigned") return;
+            
+            const facultyMember = DB.faculty.find(f => f.facultyName === facultyName);
+            const workloadLimit = facultyMember ? facultyMember.workloadLimit : DB.workloadLimit;
+
+            const uniqueSlots = new Set();
+            Object.values(DB.schedule).forEach(progSched => {
+                Object.entries(progSched).forEach(([slotKey, slotData]) => {
+                    if (slotData.facultyName === facultyName) {
+                       uniqueSlots.add(slotKey);
+                    }
+                });
+            });
+            const totalPeriods = uniqueSlots.size;
+
+            if (totalPeriods > workloadLimit) {
+                 Swal.fire({ icon: 'warning', title: 'Faculty Workload Warning', text: `${facultyName} is now scheduled for ${totalPeriods} periods, over their recommended limit of ${workloadLimit}.` });
+            }
+        }
+
+        function handleGridHover(e) {
+            const slot = e.target.closest('.time-slot');
+            if (!slot || slot.classList.contains('lunch') || slot.classList.contains('fixed-block') || !selectedCourse) {
+                dom.hoverTooltip.classList.add('hidden');
+                return;
+            }
+            const { day, period } = slot.dataset;
+            const clash = checkForFacultyClash(selectedCourse.facultyName, day, parseInt(period));
+            if (clash) {
+                dom.hoverTooltip.innerHTML = `Clash: ${clash.facultyName} teaching ${clash.course.courseName}`;
+                dom.hoverTooltip.className = 'absolute px-3 py-1 text-white text-sm rounded-lg shadow-lg z-50 bg-red-500';
+            } else {
+                dom.hoverTooltip.textContent = 'Available';
+                dom.hoverTooltip.className = 'absolute px-3 py-1 text-white text-sm rounded-lg shadow-lg z-50 bg-green-500';
+            }
+            dom.hoverTooltip.classList.remove('hidden');
+        }
+        function handleGridMouseOut() { dom.hoverTooltip.classList.add('hidden'); }
+        function handleGridMouseMove(e) {
+            dom.hoverTooltip.style.left = `${e.pageX + 15}px`;
+            dom.hoverTooltip.style.top = `${e.pageY + 15}px`;
+        }
+        
+        function handleImport() {
+            const fileInput = document.getElementById('excel-file-input');
+            const file = fileInput.files[0];
+            if (!file) { Swal.fire('No File Selected', 'Please select an Excel file.', 'error'); return; }
+
+            Swal.fire({
+                title: 'Overwrite existing data?',
+                text: "Importing a new file will replace all current courses, faculty, and schedules. This action cannot be undone.",
+                icon: 'warning',
+                showCancelButton: true,
+                confirmButtonColor: '#3085d6',
+                cancelButtonColor: '#d33',
+                confirmButtonText: 'Yes, import and replace!'
+            }).then((result) => {
+                if (result.isConfirmed) {
+                    importFile(file);
+                }
+            });
+        }
+
+        function importFile(file) {
+            dom.loader.classList.remove('hidden');
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const workbook = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
+                    const oldLimit = DB.workloadLimit || 20;
+                    const newDB = { departments: [], programs: [], faculty: [], courses: [], schedule: {}, workloadLimit: oldLimit };
+                    
+                    const programsData = XLSX.utils.sheet_to_json(workbook.Sheets['Programs'] || []);
+                    const coursesData = XLSX.utils.sheet_to_json(workbook.Sheets['Courses'] || []);
+                    const facultyData = XLSX.utils.sheet_to_json(workbook.Sheets['Faculty'] || []);
+
+                    if (programsData.length === 0 || coursesData.length === 0) {
+                        throw new Error("The 'Programs' and 'Courses' sheets are required and cannot be empty.");
+                    }
+
+                    newDB.faculty = facultyData.map(row => ({
+                        facultyName: row.facultyName,
+                        departmentName: row.departmentName,
+                        workloadLimit: row.workloadLimit || oldLimit
+                    }));
+                    
+                    newDB.programs = programsData.map(row => ({
+                        programName: row.programName,
+                        departmentName: row.departmentName,
+                        semesters: row.semesters || (row.programName.toLowerCase().includes('btech') ? 8 : 6),
+                        parentPrograms: row.parentPrograms ? row.parentPrograms.toString().split(',').map(p => p.trim()) : []
+                    }));
+                    
+                    newDB.courses = coursesData.map(row => ({
+                        ...row,
+                        periodsPerWeek: row.periodsPerWeek || 4
+                    }));
+
+                    newDB.departments = [...new Set(newDB.programs.map(p => p.departmentName).concat(newDB.faculty.map(f => f.departmentName)))]
+                        .filter(Boolean)
+                        .map(name => ({ departmentName: name }));
+
+                    DB = newDB;
+                    saveState();
+                    
+                    Swal.fire({
+                        icon: 'success', title: 'Import Successful!', html: `Your data has been loaded and normalized.`
+                    }).then(() => {
+                        selectedGroup = { program: null, semester: null };
+                        selectedFaculty = { name: null };
+                        renderAll();
+                        showView('group');
+                    });
+
+                } catch (error) { Swal.fire('Import Failed', `An error occurred: ${error.message}`, 'error'); } 
+                finally { dom.loader.classList.add('hidden'); }
+            };
+            reader.readAsArrayBuffer(file);
+        }
+        
+        function downloadTemplate() {
+            const wb = XLSX.utils.book_new();
+            
+            const programsData = [
+                { programName: "BCA", departmentName: "School of Computer Science", semesters: 6, parentPrograms: "BCA-BTech-Common, BCA-DCE-Common" },
+                { programName: "BTech CSE", departmentName: "School of Engineering", semesters: 8, parentPrograms: "BCA-BTech-Common" },
+                { programName: "BCA-DCE", departmentName: "School of Computer Science", semesters: 6, parentPrograms: "BCA-DCE-Common" },
+                { programName: "BCA-BTech-Common", departmentName: "School of Computer Science", semesters: 6, parentPrograms: "" },
+                { programName: "BCA-DCE-Common", departmentName: "School of Computer Science", semesters: 6, parentPrograms: "" }
+            ];
+            const wsPrograms = XLSX.utils.json_to_sheet(programsData);
+            XLSX.utils.book_append_sheet(wb, wsPrograms, "Programs");
+
+            const coursesData = [
+                { programName: "BCA", semester: 3, courseName: "Data Structures", courseType: "Theory", periodsPerWeek: 4, facultyName: "Dr. Ada Lovelace" },
+                { programName: "BCA", semester: 3, courseName: "Web Development", courseType: "Applied", periodsPerWeek: 4, facultyName: "Dr. Grace Hopper" },
+                { programName: "BTech CSE", semester: 5, courseName: "Advanced Algorithms", courseType: "Theory", periodsPerWeek: 4, facultyName: "Dr. Charles Babbage" },
+                { programName: "BCA-BTech-Common", semester: 1, courseName: "Intro to Programming", courseType: "Theory", periodsPerWeek: 4, facultyName: "Prof. John Doe" }
+            ];
+            const wsCourses = XLSX.utils.json_to_sheet(coursesData);
+            XLSX.utils.book_append_sheet(wb, wsCourses, "Courses");
+
+            const facultyData = [
+                { facultyName: "Dr. Ada Lovelace", departmentName: "School of Computer Science", workloadLimit: 18 },
+                { facultyName: "Dr. Grace Hopper", departmentName: "School of Computer Science", workloadLimit: 20 },
+                { facultyName: "Dr. Charles Babbage", departmentName: "School of Engineering", workloadLimit: 20 },
+                { facultyName: "Prof. John Doe", departmentName: "School of Computer Science", workloadLimit: 20 }
+            ];
+            const wsFaculty = XLSX.utils.json_to_sheet(facultyData);
+            XLSX.utils.book_append_sheet(wb, wsFaculty, "Faculty");
+
+            XLSX.writeFile(wb, "Timetable_Template_MultiSheet.xlsx");
+        }
+
+        function populateSelect(selectElement, options, isObject = false) {
+            const currentVal = selectElement.value;
+            selectElement.innerHTML = '';
+            
+            options.forEach(option => {
+                const opt = document.createElement('option');
+                if (isObject) {
+                    opt.value = option.value;
+                    opt.textContent = option.text;
+                } else {
+                    opt.value = option;
+                    opt.textContent = option;
+                }
+                selectElement.appendChild(opt);
+            });
+            if (options.map(o => isObject ? o.value : o).includes(currentVal)) {
+                selectElement.value = currentVal;
+            } else if (options.length > 0) {
+                 selectElement.value = isObject ? options[0].value : options[0];
+            }
+        }
+
+        function findAllChildPrograms(parentProgramName, allPrograms = DB.programs) {
+            const children = allPrograms
+                .filter(p => p.parentPrograms && p.parentPrograms.includes(parentProgramName))
+                .map(p => p.programName);
+            
+            return children.reduce((acc, child) => [
+                ...acc,
+                child,
+                ...findAllChildPrograms(child, allPrograms)
+            ], []);
+        }
+
+        function printTimetable(view) {
+            let gridToPrint, title;
+            if (view === 'group') {
+                if (!selectedGroup.program || !selectedGroup.semester) { Swal.fire('Cannot Print', 'Please select a program and semester first.', 'info'); return; }
+                gridToPrint = dom.timetableGrid.cloneNode(true);
+                title = `Timetable for ${selectedGroup.program} - Semester ${selectedGroup.semester}`;
+            } else {
+                 if (!selectedFaculty.name) { Swal.fire('Cannot Print', 'Please select a faculty member first.', 'info'); return; }
+                gridToPrint = dom.facultyTimetableGrid.cloneNode(true);
+                title = `Schedule for ${selectedFaculty.name}`;
+            }
+            
+            gridToPrint.querySelectorAll('.delete-btn').forEach(btn => btn.remove());
+            const printWindow = window.open('', '', 'height=800,width=1200');
+            printWindow.document.write('<html><head><title>Print Timetable</title>');
+            printWindow.document.write('<style>body { font-family: sans-serif; padding: 1rem; } .timetable-grid { display: grid; grid-template-columns: 80px repeat(8, 1fr); gap: 1px; border: 1px solid #ccc; } .grid-header, .time-slot, .scheduled-item { text-align: center; padding: 4px; border: 1px solid #ccc; font-size: 12px; } .scheduled-item { color: black !important; background-color: #f0f0f0 !important; height: 100%; } .course-name { font-weight: bold; } </style>');
+            printWindow.document.write('</head><body>');
+            printWindow.document.write(`<h1 style="text-align:center; font-size: 1.2rem; font-weight: 600; margin-bottom: 1rem;">${title}</h1>`);
+            printWindow.document.write(gridToPrint.outerHTML);
+            printWindow.document.write('</body' + '></html' + '>');
+            printWindow.document.close();
+            printWindow.focus();
+            setTimeout(() => { printWindow.print(); }, 500);
+        }
+        
+        function exportToExcel(view) {
+            let data, filename;
+            if (view === 'group') {
+                if (!selectedGroup.program || !selectedGroup.semester) { Swal.fire('Cannot Export', 'Please select a program and semester first.', 'info'); return; }
+                filename = `Timetable_${selectedGroup.program}_Sem_${selectedGroup.semester}.xlsx`;
+                data = getEffectiveScheduleForGroup(selectedGroup.program, selectedGroup.semester);
+            } else { 
+                if (!selectedFaculty.name) { Swal.fire('Cannot Export', 'Please select a faculty member first.', 'info'); return; }
+                filename = `Schedule_${selectedFaculty.name.replace(/\s/g, '_')}.xlsx`;
+                const facultySchedule = {};
+                Object.entries(DB.schedule).forEach(([progKey, progSched]) => {
+                    const [programName, semester] = progKey.split('_');
+                    Object.entries(progSched).forEach(([slotKey, slotData]) => {
+                        if (slotData.facultyName === selectedFaculty.name) facultySchedule[slotKey] = { ...slotData, programName, semester };
+                    });
+                });
+                data = facultySchedule;
+            }
+
+            const excelData = [];
+            const headerRow = ['Day/Time', ...periods.map(p => p.time)];
+            excelData.push(headerRow);
+
+            days.forEach(day => {
+                const row = [day];
+                periods.forEach(period => {
+                    const slotKey = `${day}_${period.number}`;
+                    const scheduledItem = data[slotKey];
+                    let cellValue = '';
+                    if (scheduledItem) {
+                        if (view === 'group') cellValue = `${scheduledItem.course.courseName}\n(${scheduledItem.facultyName})`;
+                        else cellValue = `${scheduledItem.course.courseName}\n(${scheduledItem.programName} - Sem ${scheduledItem.semester})`;
+                    }
+                    row.push(cellValue);
+                });
+                excelData.push(row);
+            });
+
+            const ws = XLSX.utils.aoa_to_sheet(excelData);
+            const colWidths = headerRow.map((_, i) => ({ wch: i === 0 ? 15 : 25 }));
+            ws['!cols'] = colWidths;
+
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'Timetable');
+            XLSX.writeFile(wb, filename);
+        }
+
+        function handleDragStart(e) {
+            if (e.target.classList.contains('course-card')) {
+                e.dataTransfer.setData('text/plain', e.target.dataset.courseId);
+                e.target.classList.add('dragging');
+            }
+        }
+        function handleDragOver(e) {
+            e.preventDefault();
+            const slot = e.target.closest('.time-slot');
+            if (slot && !slot.classList.contains('lunch') && !slot.classList.contains('fixed-block')) {
+                slot.classList.add('drag-over');
+            }
+        }
+        function handleDragLeave(e) {
+            const slot = e.target.closest('.time-slot');
+            if (slot) slot.classList.remove('drag-over');
+        }
+        function handleDrop(e) {
+            e.preventDefault();
+            const slot = e.target.closest('.time-slot');
+            if (slot) {
+                slot.classList.remove('drag-over');
+                const courseId = e.dataTransfer.getData('text/plain');
+                const courseToSchedule = DB.courses.find(c => getCourseUniqueId(c) === courseId);
+                if (courseToSchedule) {
+                    const { day, period } = slot.dataset;
+                    scheduleCourseAt(day, parseInt(period), courseToSchedule);
+                }
+            }
+            document.querySelector('.course-card.dragging')?.classList.remove('dragging');
+        }
+
+    </script>
+
+    <!-- Unit Test Suite (No changes needed here) -->
+    <script type="module">
+        const testSuite = {
+            tests: [],
+            describe(name, fn) {
+                console.group(`%c${name}`, 'color: #e09511; font-weight: bold;');
+                fn();
+                console.groupEnd();
+            },
+            it(name, fn) {
+                try {
+                    fn();
+                    console.log(`%c  ✓ ${name}`, 'color: #22c55e;');
+                } catch (e) {
+                    console.error(`%c  ✗ ${name}`, 'color: #ef4444;');
+                    console.error(e);
+                }
+            },
+            assertEquals(a, b) {
+                if (JSON.stringify(a) !== JSON.stringify(b)) {
+                    throw new Error(`Assertion failed: ${JSON.stringify(a)} does not equal ${JSON.stringify(b)}`);
+                }
+            }
+        };
+
+        function runTests() {
+            const { describe, it, assertEquals } = testSuite;
+            
+            function findAllChildPrograms(parentProgramName, allPrograms) {
+                const children = allPrograms
+                    .filter(p => p.parentPrograms && p.parentPrograms.includes(parentProgramName))
+                    .map(p => p.programName);
+                
+                return children.reduce((acc, child) => [
+                    ...acc,
+                    child,
+                    ...findAllChildPrograms(child, allPrograms)
+                ], []);
+            }
+
+            function getEffectiveScheduleForGroup(programName, semester, visited, programs, schedule) {
+                if (!programName || visited.has(programName)) return {};
+                visited.add(programName);
+
+                const program = programs.find(p => p.programName === programName);
+                if (!program) return {};
+
+                let parentSchedules = {};
+                if (program.parentPrograms && program.parentPrograms.length > 0) {
+                    program.parentPrograms.forEach(parentName => {
+                        const parentSchedule = getEffectiveScheduleForGroup(parentName, semester, new Set(), programs, schedule);
+                        parentSchedules = { ...parentSchedules, ...parentSchedule };
+                    });
+                }
+                
+                const ownScheduleKey = `${programName}_${semester}`;
+                const ownSchedule = schedule[ownScheduleKey] || {};
+
+                return { ...parentSchedules, ...ownSchedule };
+            }
+
+            const mockPrograms = [
+                { programName: "BCA", parentPrograms: ["BCA-BTech-Common", "BCA-DCE-Common"] },
+                { programName: "BTech", parentPrograms: ["BCA-BTech-Common"] },
+                { programName: "BCA-DCE", parentPrograms: ["BCA-DCE-Common"] },
+                { programName: "BCA-BTech-Common", parentPrograms: [] },
+                { programName: "BCA-DCE-Common", parentPrograms: [] }
+            ];
+
+            const mockCourses = [
+                { programName: "BCA-BTech-Common", semester: 1, courseName: "Intro to C", facultyName: "Prof. Kernighan" },
+                { programName: "BCA-DCE-Common", semester: 1, courseName: "Digital Logic", facultyName: "Prof. Boole" },
+                { programName: "BCA", semester: 1, courseName: "Maths-I", facultyName: "Prof. Euler" },
+            ];
+
+            const mockSchedule = {
+                "BCA-BTech-Common_1": {
+                    "Monday_1": { course: mockCourses[0], facultyName: "Prof. Kernighan" }
+                },
+                "BCA-DCE-Common_1": {
+                    "Tuesday_2": { course: mockCourses[1], facultyName: "Prof. Boole" }
+                },
+                "BCA_1": {
+                    "Wednesday_3": { course: mockCourses[2], facultyName: "Prof. Euler" }
+                }
+            };
+            
+            describe('Hierarchy and Schedule Logic', () => {
+                it('should find all child programs for a parent', () => {
+                    const children = findAllChildPrograms("BCA-BTech-Common", mockPrograms).sort();
+                    assertEquals(children, ["BCA", "BTech"].sort());
+                });
+
+                it('should inherit schedules from multiple parents', () => {
+                    const bcaSchedule = getEffectiveScheduleForGroup("BCA", 1, new Set(), mockPrograms, mockSchedule);
+                    assertEquals(bcaSchedule["Monday_1"]?.course.courseName, "Intro to C");
+                    assertEquals(bcaSchedule["Tuesday_2"]?.course.courseName, "Digital Logic");
+                    assertEquals(bcaSchedule["Wednesday_3"]?.course.courseName, "Maths-I");
+                });
+            });
+
+            console.log('%cUnit Test Suite Complete.', 'color: #3b82f6; font-weight: bold;');
+        }
+
+        runTests();
+
+    </script>
+</body>
+</html>
