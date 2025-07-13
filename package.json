@@ -1,7 +1,8 @@
 {
-    "name": "timetable-serverless-auth",
-    "version": "1.0.0",
-    "dependencies": {
-      "firebase-admin": "^12.0.0"
-    }
+  "name": "timetable-serverless-auth",
+  "version": "1.0.0",
+  "dependencies": {
+    "firebase-admin": "^12.0.0",
+    "dotenv": "^16.3.1"
   }
+}

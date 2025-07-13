@@ -1,6 +1,6 @@
 // netlify/functions/get-firebase-token.js
 const admin = require("firebase-admin");
-
+require("dotenv").config();
 // Securely initialize Firebase Admin SDK from environment variables
 // These will be set in the Netlify UI, NOT here in the code.
 if (!admin.apps.length) {
